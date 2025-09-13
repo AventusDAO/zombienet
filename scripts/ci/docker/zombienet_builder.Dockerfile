@@ -2,7 +2,7 @@
 FROM node:18-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN npm install
+RUN npm ci
 RUN npm run clean
 RUN npm run build
 
@@ -58,7 +58,7 @@ COPY --from=builder ./app/dist ./dist
 COPY static-configs ./static-configs
 COPY scripts ./scripts
 COPY package* ./
-RUN npm install --production
+RUN npm ci --production
 RUN chown -R nonroot. /home/nonroot
 
 # Change `cli` permissions and link to easy call
