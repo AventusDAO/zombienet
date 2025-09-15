@@ -58,7 +58,7 @@ COPY --from=builder ./app/dist ./dist
 COPY static-configs ./static-configs
 COPY scripts ./scripts
 COPY package* ./
-RUN npm install --production
+RUN npm install --omit=dev
 RUN chown -R nonroot. /home/nonroot
 
 # Change `cli` permissions and link to easy call

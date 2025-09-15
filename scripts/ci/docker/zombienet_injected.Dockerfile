@@ -44,7 +44,7 @@ COPY scripts ./scripts
 COPY tests ./tests
 COPY javascript/package.json ./
 COPY javascript/package-lock.json ./
-RUN npm install --production
+RUN ((npm ci --omit=dev || npm install --omit=dev) || npm install --omit=dev)
 # RUN chown -R nonroot. /home/nonroot
 
 # RUN ls -la /home/nonroot/zombie-net/packages/cli/dist
