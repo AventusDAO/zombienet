@@ -73,5 +73,9 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
+  },
+  "overrides": {
+    "strip-ansi": "6.0.1",
+    "error-ex": "1.3.2"
   }
 }
