@@ -22,6 +22,7 @@ export function getNodeKey(node: Node, useStash = true): GenesisNodeKey {
       authority_discovery: sr_account.address,
       im_online: sr_account.address,
       avn: sr_account.address,
+      node: sr_account.address,
     },
   ];
 
