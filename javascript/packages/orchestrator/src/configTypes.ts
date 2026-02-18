@@ -47,6 +47,7 @@ export interface RelayChainConfig {
   total_node_in_groups?: number;
   genesis?: JSON | ObjectJSON;
   default_delay_network_settings?: DelayNetworkSettings;
+  use_stash_for_validators?: boolean;
 }
 
 export interface ComputedNetwork {
@@ -57,6 +58,7 @@ export interface ComputedNetwork {
     defaultArgs: string[];
     defaultDbSnapshot?: string;
     defaultPrometheusPrefix: string;
+    defaultSubstrateCliArgsVersion?: SubstrateCliArgsVersion;
     chain: string;
     chainSpecPath?: string;
     chainSpecCommand?: string;
@@ -68,6 +70,7 @@ export interface ComputedNetwork {
     defaultResources?: Resources;
     delayNetworkSettings?: DelayNetworkSettings;
     force_decorator?: string;
+    useStashForValidators: boolean;
   };
   parachains: Parachain[];
   types: any;
@@ -100,6 +103,9 @@ export interface Settings {
   // Allow to manage how we verify node readiness or disable (None)
   // Metric: query prometheus startProcess metric
   node_verifier?: "None" | "Metric";
+  // If true zombienet will add a random sufix to `protocolId` and use the same `protocolId`sufix
+  // as `forkId` to prevent other nodes to connect to this chain.
+  isolate_env?: boolean;
 }
 
 export interface GlobalVolume {
@@ -112,6 +118,7 @@ export interface ParachainConfig extends CommonParachainConfig {
   add_to_genesis?: boolean;
   register_para?: boolean;
   onboard_as_parachain?: boolean;
+  with_custom_props?: boolean;
   genesis_wasm_path?: string;
   genesis_wasm_generator?: string;
   genesis_state_path?: string;
@@ -121,10 +128,12 @@ export interface ParachainConfig extends CommonParachainConfig {
   cumulus_based?: boolean;
   bootnodes?: string[];
   prometheus_prefix?: string;
+  default_substrate_cli_args_version?: SubstrateCliArgsVersion;
   // backward compatibility
   collator?: NodeConfig;
   collators?: NodeConfig[];
   collator_groups?: NodeGroupConfig[];
+  default_args: string[];
 }
 
 export interface NodeGroupConfig extends NodeCommonTypes {

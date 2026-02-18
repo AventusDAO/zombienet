@@ -31,7 +31,7 @@ jobs:
 
       - name: Upload build artifacts
         if: ${{ matrix.node-version == '18.x' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-build-${{ github.sha }}
           path: |
@@ -44,21 +44,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust Stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
+         
+      - name: Install fmt and clippy
+        run: |
+          rustup component add rustfmt
+          rustup component add clippy
+          
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
-
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
-
+        
+      - name: Run clippy
+        run: cargo clippy --all-features -- -D warnings
+        
       - name: Build
         run: cargo build
 
@@ -95,7 +92,7 @@ jobs:
   #       with:
   #         name: ${{ runner.os }}-build-${{ github.sha }}
   #         path: ./javascript/packages
-        
+
   #     - name: Install dependencies
   #       run: npm install --ignore-scripts
   #       working-directory: ./javascript

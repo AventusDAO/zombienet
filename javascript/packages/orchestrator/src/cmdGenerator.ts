@@ -10,6 +10,85 @@ import { Node, ZombieRole, SubstrateCliArgsVersion } from "./sharedTypes";
 
 const debug = require("debug")("zombie::cmdGenerator");
 
+/**
+ * Parses exclusion flags from args array and returns both exclusions and filtered args
+ * Exclusion syntax: -:<flag> (e.g., -:--insecure-validator-i-know-what-i-do or -:insecure-validator-i-know-what-i-do)
+ * @param args - Array of command line arguments
+ * @returns Object containing exclusions set and filtered args array
+ */
+function parseExclusionFlags(args: string[]): {
+  exclusions: Set<string>;
+  filteredArgs: string[];
+} {
+  const exclusions = new Set<string>();
+  const filteredArgs: string[] = [];
+
+  for (const arg of args) {
+    if (arg.startsWith("-:")) {
+      // Extract the flag to exclude (remove -: prefix)
+      let flagToExclude = arg.substring(2);
+
+      // Normalize flag format - ensure it starts with --
+      if (!flagToExclude.startsWith("--")) {
+        flagToExclude = `--${flagToExclude}`;
+      }
+
+      exclusions.add(flagToExclude);
+    } else {
+      filteredArgs.push(arg);
+    }
+  }
+
+  return { exclusions, filteredArgs };
+}
+
+/**
+ * Filters out excluded flags from a command arguments array
+ * @param cmdArgs - Array of command arguments to filter
+ * @param exclusions - Set of flags to exclude
+ * @returns Filtered array with excluded flags removed
+ */
+function filterExcludedFlags(
+  cmdArgs: string[],
+  exclusions: Set<string>,
+): string[] {
+  if (exclusions.size === 0) return cmdArgs;
+
+  const filtered: string[] = [];
+  let skipNext = false;
+
+  for (let i = 0; i < cmdArgs.length; i++) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+
+    const arg = cmdArgs[i];
+
+    let shouldExclude = false;
+    for (const excludedFlag of exclusions) {
+      if (arg === excludedFlag || arg.startsWith(`${excludedFlag}=`)) {
+        shouldExclude = true;
+        // If the flag doesn't contain '=' and has a separate value, skip the next argument too
+        if (
+          !arg.includes("=") &&
+          i + 1 < cmdArgs.length &&
+          !cmdArgs[i + 1].startsWith("-")
+        ) {
+          skipNext = true;
+        }
+        break;
+      }
+    }
+
+    if (!shouldExclude) {
+      filtered.push(arg);
+    }
+  }
+
+  return filtered;
+}
+
 interface ParachainArgsInterface {
   [key: string]: boolean;
 }
@@ -69,6 +148,9 @@ export async function genCumulusCollatorCmd(
     "--prometheus-port": true,
   };
 
+  // bind localhost only in native provider
+  const ip_to_bind = useWrapper ? "0.0.0.0" : "127.0.0.1";
+
   let fullCmd: string[] = [
     nodeSetup.command || DEFAULT_COMMAND,
     "--name",
@@ -80,10 +162,11 @@ export async function genCumulusCollatorCmd(
     "--base-path",
     dataPath,
     "--listen-addr",
-    `/ip4/0.0.0.0/tcp/${nodeSetup.p2pPort ? nodeSetup.p2pPort : P2P_PORT}/ws`,
+    `/ip4/${ip_to_bind}/tcp/${nodeSetup.p2pPort ? nodeSetup.p2pPort : P2P_PORT}/ws`,
     "--prometheus-external",
     "--rpc-cors all",
-    "--unsafe-rpc-external",
+    // Do not add `--unsafe-rpc-external` in native provider
+    useWrapper ? "--unsafe-rpc-external" : "",
     "--rpc-methods unsafe",
   ];
 
@@ -101,9 +184,11 @@ export async function genCumulusCollatorCmd(
 
   if (validator) fullCmd.push(...["--collator"]);
 
+  // ports passed to the relaychain part of the collator binary
   const collatorPorts: PortsInterface = {
     "--port": 0,
     "--rpc-port": 0,
+    "--prometheus-port": 0,
   };
 
   if (nodeSetup.args.length > 0) {
@@ -118,15 +203,30 @@ export async function genCumulusCollatorCmd(
       argsFullNode = nodeSetup.args.slice(splitIndex + 1);
     }
 
+    // Parse exclusion flags from parachain args
+    const {
+      exclusions: parachainExclusions,
+      filteredArgs: filteredParachainArgs,
+    } = parseExclusionFlags(argsParachain || []);
+    argsParachain = filteredParachainArgs;
+
+    // Parse exclusion flags from full node args if they exist
+    let fullNodeExclusions = new Set<string>();
+    if (argsFullNode) {
+      const { exclusions, filteredArgs } = parseExclusionFlags(argsFullNode);
+      fullNodeExclusions = exclusions;
+      argsFullNode = filteredArgs;
+    }
+
     if (argsParachain) {
       for (const arg of argsParachain) {
         if (parachainAddedArgs[arg]) continue;
-
-        // add
-        debug(`adding ${arg}`);
         fullCmd.push(arg);
       }
     }
+
+    // Apply parachain exclusions to the current fullCmd
+    fullCmd = filterExcludedFlags(fullCmd, parachainExclusions);
 
     // Arguments for the relay chain node part of the collator binary.
     fullCmd.push(
@@ -181,6 +281,8 @@ export async function genCumulusCollatorCmd(
 
       fullCmd = fullCmd.concat(argsFullNode);
       debug(`Added ${argsFullNode} to collator`);
+
+      fullCmd = filterExcludedFlags(fullCmd, fullNodeExclusions);
     } else {
       // ensure ports
       for (const portArg of Object.keys(collatorPorts)) {
@@ -250,7 +352,8 @@ export async function genCmd(
 
   if (!command) command = DEFAULT_COMMAND;
 
-  args = [...args];
+  const { exclusions, filteredArgs } = parseExclusionFlags(args);
+  args = [...filteredArgs];
   args.push("--no-mdns");
 
   if (key) args.push(...["--node-key", key]);
@@ -299,14 +402,20 @@ export async function genCmd(
     args[listenIndex + 1] = listenAddr;
   } else {
     // no --listen-add args
-    args.push(...["--listen-addr", `/ip4/0.0.0.0/tcp/${nodeSetup.p2pPort}/ws`]);
+    // bind localhost only in native provider
+    const ip_to_bind = useWrapper ? "0.0.0.0" : "127.0.0.1";
+    args.push(
+      ...["--listen-addr", `/ip4/${ip_to_bind}/tcp/${nodeSetup.p2pPort}/ws`],
+    );
   }
 
-  // set our base path
-  const basePathFlagIndex = args.findIndex((arg) => arg === "--base-path");
-  if (basePathFlagIndex >= 0) args.splice(basePathFlagIndex, 2);
-  args.push(...["--base-path", dataPath]);
-
+  // set our base path - only if user hasn't provided one
+  const hasUserBasePath = args.some(
+    (arg) => arg === "--base-path" || arg.startsWith("--base-path="),
+  );
+  if (!hasUserBasePath) {
+    args.push(...["--base-path", dataPath]);
+  }
   if (nodeSetup.substrateCliArgsVersion === SubstrateCliArgsVersion.V0)
     args.push("--unsafe-ws-external");
 
@@ -318,13 +427,16 @@ export async function genCmd(
     name,
     "--rpc-cors",
     "all",
-    "--unsafe-rpc-external",
+    // Do not add `--unsafe-rpc-external` in native provider
+    useWrapper ? "--unsafe-rpc-external" : "",
     "--rpc-methods",
     "unsafe",
     ...args,
   ];
 
-  const resolvedCmd = [finalArgs.join(" ")];
+  const filteredFinalArgs = filterExcludedFlags(finalArgs, exclusions);
+
+  const resolvedCmd = [filteredFinalArgs.join(" ")];
   if (useWrapper) resolvedCmd.unshift("/cfg/zombie-wrapper.sh");
   return resolvedCmd;
 }
@@ -341,10 +453,10 @@ const getPortFlagsByCliArgsVersion = (nodeSetup: Node) => {
     portFlags["--rpc-port"] = (nodeSetup.rpcPort || RPC_HTTP_PORT).toString();
     portFlags["--ws-port"] = (nodeSetup.wsPort || RPC_WS_PORT).toString();
   } else {
-    // use ws port as default
-    const portToUse = nodeSetup.wsPort
-      ? nodeSetup.wsPort
-      : nodeSetup.rpcPort || RPC_HTTP_PORT;
+    // use rpc_port as default (since ws_port was deprecated in https://github.com/paritytech/substrate/pull/13384)
+    const portToUse = nodeSetup.rpcPort
+      ? nodeSetup.rpcPort
+      : nodeSetup.wsPort || RPC_HTTP_PORT;
     portFlags["--rpc-port"] = portToUse.toString();
   }
 

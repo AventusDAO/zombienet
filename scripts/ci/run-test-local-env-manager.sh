@@ -4,7 +4,6 @@
 
 set -eou pipefail
 
-
 function usage {
   cat << EOF
 DEPENDENCY 1: gcloud
@@ -42,7 +41,11 @@ function main {
   create_isolated_dir
   copy_to_isolated
   set_instance_env
+  if [[ $KUBECONFIG == "" ]]; then
+    k8s_auth
+  fi
   run_test
+  rm_isolated_dir
   log INFO "Exit status is ${EXIT_STATUS}"
   exit "${EXIT_STATUS}"
 }
@@ -54,6 +57,17 @@ function create_isolated_dir {
   OUTPUT_DIR="${ISOLATED}"
 }
 
+function copy_to_isolated {
+  cd "${SCRIPT_PATH}"
+  echo $(pwd)
+  cp -r "${LOCAL_DIR}"/* "${OUTPUT_DIR}"
+}
+
+function rm_isolated_dir {
+  echo "Removing ${OUTPUT_DIR}"
+  rm -rf "${OUTPUT_DIR}"
+}
+
 function set_defaults_for_globals {
   # DEFAULT VALUES for variables used for testing different projects
   SCRIPT_NAME="$0"
@@ -62,13 +76,21 @@ function set_defaults_for_globals {
 
   export GOOGLE_CREDENTIALS="/etc/zombie-net/sa-zombie.json"
 
+  ZOMBIE_LOCAL=${ZOMBIE_LOCAL:-""}
+  KUBECONFIG=${KUBECONFIG:-""}
+
+  if [[ ${ZOMBIE_LOCAL} == "1" ]]; then
+    ZOMBIE_COMMAND="npm run zombie"
+  else
+    ZOMBIE_COMMAND=zombie
+  fi
+
   cd "${SCRIPT_PATH}"
 
   EXIT_STATUS=0
   LOCAL_DIR=""
   TEST_TO_RUN=""
   CONCURRENCY=2
-
 
   LAUNCH_ARGUMENTS=""
   USE_LOCAL_TESTS=false
@@ -110,12 +132,6 @@ function parse_args {
   check_args
 }
 
-function copy_to_isolated {
-  cd "${SCRIPT_PATH}"
-  echo $(pwd)
-  cp -r "${LOCAL_DIR}"/* "${OUTPUT_DIR}"
-}
-
 function set_instance_env {
   if [[ ${CI_PIPELINE_ID:=""} && ${CI_PROJECT_ID:=""} ]]; then
     echo project_id: $CI_PROJECT_ID
@@ -145,7 +161,7 @@ function set_instance_env {
   fi;
 }
 
-function run_test {
+function k8s_auth {
   # RUN_IN_CONTAINER is env var that is set in the dockerfile
   if  [[ -v RUN_IN_CONTAINER  ]]; then
     if [[ -v GHA_CLUSTER_SERVER_ADDR ]]; then
@@ -158,6 +174,9 @@ function run_test {
       gcloud container clusters get-credentials parity-zombienet --zone europe-west3-b --project parity-zombienet
     fi;
   fi
+}
+
+function run_test {
   cd "${OUTPUT_DIR}"
   set -x
   set +e
@@ -170,7 +189,11 @@ function run_test {
     TEST_FOUND=0
     for i in $(find ${OUTPUT_DIR} -name "${TEST_TO_RUN}"| head -1); do
       TEST_FOUND=1
-      zombie -c $CONCURRENCY test $i
+      # copy files if env variable ZOMBIE_LOCAL is set
+      if [[ ! -z $ZOMBIE_LOCAL ]]; then
+        cp -r ../../../javascript/* .
+      fi;
+      ${ZOMBIE_COMMAND} -c $CONCURRENCY test $i
       EXIT_STATUS=$?
     done;
     if [[ $TEST_FOUND -lt 1 ]]; then
@@ -179,7 +202,7 @@ function run_test {
   else
     for i in $(find ${OUTPUT_DIR} -name *.zndsl | sort); do
       echo "running test: ${i}"
-      zombie -c $CONCURRENCY test $i
+      ${ZOMBIE_COMMAND} -c $CONCURRENCY test $i
       TEST_EXIT_STATUS=$?
       EXIT_STATUS=$((EXIT_STATUS+TEST_EXIT_STATUS))
     done;
@@ -203,4 +226,10 @@ function log {
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  log INFO "Running main"
+  main "$@"
+else
+  log WARN "Script is being sourcing"
+fi
+
