@@ -1,6 +1,9 @@
 import { decorators, getRandomPort } from "@zombienet/utils";
 import fs from "fs";
-import chainSpecFns, { isRawSpec } from "./chainSpec";
+import chainSpecFns, {
+  customizeParachainRawSpec,
+  isRawSpec,
+} from "./chainSpec";
 import { getUniqueName } from "./configGenerator";
 import {
   DEFAULT_COLLATOR_IMAGE,
@@ -28,6 +31,7 @@ export async function generateParachainFiles(
   relayChainName: string,
   parachain: Parachain,
   relayChainSpecIsRaw: boolean,
+  random_sufix_to_isolate: string | null = null,
 ): Promise<void> {
   const [
     addAuraAuthority,
@@ -191,7 +195,20 @@ export async function generateParachainFiles(
       const paraSpecRaw = readAndParseChainSpec(chainSpecFullPath);
       if (paraSpecRaw.para_id) paraSpecRaw.para_id = parachain.id;
       if (paraSpecRaw.paraId) paraSpecRaw.paraId = parachain.id;
-      writeChainSpec(chainSpecFullPath, paraSpecRaw);
+
+      // Customize the parachain chain-spec fields (name, id, protocolId)
+      customizeParachainRawSpec(chainSpecFullPath, parachain);
+
+      // make chain unique if is set
+      if (random_sufix_to_isolate) {
+        const updatedSpec = readAndParseChainSpec(chainSpecFullPath);
+        // customize forkId/protocolId to make chain uniq
+        updatedSpec.forkId = `${updatedSpec.protocolId}-${random_sufix_to_isolate}`;
+        updatedSpec.protocolId = `${updatedSpec.protocolId}-${random_sufix_to_isolate}`;
+        writeChainSpec(chainSpecFullPath, updatedSpec);
+      } else {
+        writeChainSpec(chainSpecFullPath, paraSpecRaw);
+      }
     } catch (e: any) {
       if (e.code !== "ERR_FS_FILE_TOO_LARGE") throw e;
 

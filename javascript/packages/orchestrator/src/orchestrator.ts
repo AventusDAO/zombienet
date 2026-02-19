@@ -23,6 +23,7 @@ import {
   addParachainToGenesis,
   customizePlainRelayChain,
   readAndParseChainSpec,
+  writeChainSpec,
 } from "./chainSpec";
 import {
   generateBootnodeSpec,
@@ -77,6 +78,9 @@ export async function start(
   options?: OrcOptionsInterface,
 ) {
   const spawnStart = performance.now();
+  const namespaceInjectedByCI = !!(
+    process.env.ZOMBIE_K8S_CI_NAMESPACE || process.env.ZOMBIE_NAMESPACE
+  );
 
   const opts = {
     ...{
@@ -122,7 +126,10 @@ export async function start(
 
     // set namespace
     const randomBytes = networkSpec.settings.provider === "podman" ? 4 : 16;
-    const namespace = `zombie-${generateNamespace(randomBytes)}`;
+    const namespace =
+      process.env.ZOMBIE_NAMESPACE ||
+      process.env.ZOMBIE_K8S_CI_NAMESPACE ||
+      `zombie-${generateNamespace(randomBytes)}`;
 
     // get user defined types
     const userDefinedTypes: any = loadTypeDef(networkSpec.types);
@@ -218,13 +225,17 @@ export async function start(
       },
     );
 
-    // create namespace
-    await client.createNamespace();
+    // Only create the namespace if isn't injected by CI
+    if (!namespaceInjectedByCI) {
+      await client.createNamespace();
+    }
 
     // setup cleaner
     if (!opts.monitor) {
-      cronInterval = await client.setupCleaner();
-      debug("Cleaner job configured");
+      if (!process.env.ZOMBIE_CLEANER_DISABLED) {
+        cronInterval = await client.setupCleaner();
+        debug("Cleaner job configured");
+      }
     }
 
     // Create bootnode and backchannel services
@@ -234,7 +245,14 @@ export async function start(
 
     // Set substrate client argument version, needed from breaking change.
     // see https://github.com/paritytech/substrate/pull/13384
+    // This will only spawn detection processes for nodes that don't have
+    // substrate_cli_args_version configured via default_substrate_cli_args_version
+    // or individual node substrate_cli_args_version settings
     await setSubstrateCliArgsVersion(networkSpec, client);
+
+    const random_suffix_to_isolate = networkSpec.settings.isolate_env
+      ? generateNamespace(2)
+      : null;
 
     // create or copy relay chain spec
     await setupChainSpec(
@@ -265,6 +283,7 @@ export async function start(
         chainName,
         parachain,
         relayChainSpecIsRaw,
+        random_suffix_to_isolate,
       );
     };
 
@@ -307,6 +326,15 @@ export async function start(
         )} 🚧`,
       );
       await fs.promises.copyFile(chainSpecFullPathPlain, chainSpecFullPath);
+    }
+
+    // make chain unique if is set
+    if (random_suffix_to_isolate) {
+      // customize forkId/protocolId to make chain uniq
+      const chainSpecContent = readAndParseChainSpec(chainSpecFullPath);
+      chainSpecContent.forkId = `${chainSpecContent.protocolId}${random_suffix_to_isolate}`;
+      chainSpecContent.protocolId = `${chainSpecContent.protocolId}${random_suffix_to_isolate}`;
+      writeChainSpec(chainSpecFullPath, chainSpecContent);
     }
 
     // ensure chain raw is ok

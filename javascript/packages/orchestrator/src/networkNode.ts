@@ -4,6 +4,7 @@ import { makeRe } from "minimatch";
 import {
   DEFAULT_INDIVIDUAL_TEST_TIMEOUT,
   LOCALHOST,
+  RPC_HTTP_PORT,
   RPC_WS_PORT,
   WS_URI_PATTERN,
 } from "./constants";
@@ -78,10 +79,14 @@ export class NetworkNode implements NetworkNodeInterface {
 
     const url = new URL(this.wsUri);
     if (
-      parseInt(url.port, 10) !== RPC_WS_PORT &&
+      ![RPC_WS_PORT, RPC_HTTP_PORT].includes(parseInt(url.port, 10)) &&
       client.providerName !== "native"
     ) {
-      const fwdPort = await client.startPortForwarding(RPC_WS_PORT, this.name);
+      // use rpc_port as default (since ws_port was deprecated in https://github.com/paritytech/substrate/pull/13384)
+      const fwdPort = await client.startPortForwarding(
+        RPC_HTTP_PORT,
+        this.name,
+      );
 
       this.wsUri = WS_URI_PATTERN.replace("{{IP}}", LOCALHOST).replace(
         "{{PORT}}",
@@ -233,7 +238,9 @@ export class NetworkNode implements NetworkNodeInterface {
           desiredMetricValue === null ||
           compare(comparator!, value, desiredMetricValue)
         ) {
-          debug(`value: ${value} ~ desiredMetricValue: ${desiredMetricValue}`);
+          debug(
+            `[${this.name}] value: ${value} ~ desiredMetricValue: ${desiredMetricValue}`,
+          );
           return value;
         }
       }
@@ -244,7 +251,9 @@ export class NetworkNode implements NetworkNodeInterface {
         while (!done && !timedout) {
           c++;
           await new Promise((resolve) => setTimeout(resolve, 1000));
-          debug(`fetching metrics - q: ${c}  time:  ${new Date()}`);
+          debug(
+            `[${this.name}] Fetching metrics - q: ${c}  time:  ${new Date()}`,
+          );
           this.cachedMetrics = await fetchMetrics(this.prometheusUri);
           value = this._getMetric(metricName, desiredMetricValue === null);
 
@@ -256,7 +265,7 @@ export class NetworkNode implements NetworkNodeInterface {
             done = true;
           } else {
             debug(
-              `current value: ${value} for metric ${rawMetricName}, keep trying...`,
+              `[${this.name}] Current value: ${value} for metric ${rawMetricName}, keep trying...`,
             );
           }
         }
@@ -268,7 +277,7 @@ export class NetworkNode implements NetworkNodeInterface {
           setTimeout(() => {
             timedout = true;
             const err = new Error(
-              `Timeout(${timeout}), "getting desired metric value ${desiredMetricValue} within ${timeout} secs".`,
+              `[${this.name}] Timeout(${timeout}), "getting desired metric value ${desiredMetricValue} within ${timeout} secs".`,
             );
             return resolve(err);
           }, timeout * 1000),
@@ -437,16 +446,16 @@ export class NetworkNode implements NetworkNodeInterface {
     desiredMetricValue: number,
     timeout: number = DEFAULT_INDIVIDUAL_TEST_TIMEOUT,
   ): Promise<number> {
+    let total_count = 0;
     try {
-      let total_count = 0;
       const re = isGlob ? makeRe(pattern) : new RegExp(pattern, "ig");
       if (!re) throw new Error(`Invalid glob pattern: ${pattern} `);
       const client = getClient();
-      const getValue = async (): Promise<number> => {
+      const getValue = async (): Promise<void> => {
         let done = false;
 
         while (!done) {
-          let value = 0;
+          let counter = 0;
           const logs = await client.getNodeLogs(this.name, undefined, true);
 
           for (let line of logs.split("\n")) {
@@ -455,20 +464,17 @@ export class NetworkNode implements NetworkNodeInterface {
               line = line.split(" ").slice(1).join(" ");
             }
             if (re.test(line)) {
-              value += 1;
+              counter += 1;
             }
           }
 
-          // save to return
-          total_count = value;
-          if (compare(comparator, value, desiredMetricValue)) {
+          total_count = counter;
+          if (compare(comparator, counter, desiredMetricValue)) {
             done = true;
           } else {
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }
         }
-
-        return total_count;
       };
 
       const resp = await Promise.race([
@@ -495,7 +501,7 @@ export class NetworkNode implements NetworkNodeInterface {
           err?.message,
         )}\n`,
       );
-      return 0;
+      return total_count;
     }
   }
 

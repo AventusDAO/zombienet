@@ -180,10 +180,7 @@ fn parse_custom_script_rule(
     let mut pairs = record.into_inner();
     let node_name = parse_name(get_pair(&mut pairs, "name")?)?;
     let file_path_str = get_pair(&mut pairs, "file_path")?.as_str();
-    let file_path: PathBuf = file_path_str
-        .try_into()
-        .map_err(|_| errors::ParserError::ParseError(format!("Invalid path: {file_path_str}")))?;
-
+    let file_path: PathBuf = file_path_str.into();
     let mut args: Option<String> = None;
     let mut cmp: Option<Comparison> = None;
     let mut timeout = None;
@@ -192,6 +189,9 @@ fn parse_custom_script_rule(
         match inner_record.as_rule() {
             Rule::double_quoted_string => {
                 args = Some(inner_record.as_str().trim_matches('"').to_owned());
+            }
+            Rule::single_quoted_string => {
+                args = Some(inner_record.as_str().trim_matches('\'').to_owned());
             }
             Rule::comparison => {
                 cmp = Some(parse_comparison(inner_record)?);
@@ -672,9 +672,9 @@ pub fn parse(unparsed_file: &str) -> Result<ast::TestDefinition, errors::ParserE
         }
     }
 
-    if network.is_none() || creds.is_none() {
+    if network.is_none() {
         return Err(errors::ParserError::MissingFields(String::from(
-            "Missing Network/Creds field",
+            "Missing Network",
         )));
     }
 
@@ -682,7 +682,7 @@ pub fn parse(unparsed_file: &str) -> Result<ast::TestDefinition, errors::ParserE
     let test_def = TestDefinition {
         description,
         network: network.unwrap(),
-        creds: creds.unwrap(),
+        creds,
         assertions,
     };
 

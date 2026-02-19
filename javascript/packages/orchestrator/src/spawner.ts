@@ -12,6 +12,7 @@ import {
   LOCALHOST,
   METRICS_URI_PATTERN,
   PROMETHEUS_PORT,
+  RPC_HTTP_PORT,
   RPC_WS_PORT,
   WS_URI_PATTERN,
 } from "./constants";
@@ -106,6 +107,7 @@ export const spawnNode = async (
     keystoreLocalDir,
     parachainSpecId || network.chainId,
     node.dbSnapshot,
+    true, // long running
   );
 
   const [nodeIp, nodePort] = await client.getNodeInfo(podDef.metadata.name);
@@ -120,18 +122,23 @@ export const spawnNode = async (
 
   let networkNode: NetworkNode;
 
-  const endpointPort = RPC_WS_PORT;
+  const endpointPort =
+    node.substrateCliArgsVersion == 0 ? RPC_WS_PORT : RPC_HTTP_PORT;
   if (opts.inCI) {
+    // UPDATE: 04-10-2024 Since we have several reports of failures related to
+    // can't access metrics by dns, we switch back to use the pod ip.
+
     // in CI we deploy a service (with the pod name) in front of each pod
     // so here we can use the name (as short dns in the ns) to connect to pod.
-    const nodeDns = `${podDef.metadata.name}.${namespace}.svc.cluster.local`;
+    // const nodeDns = `${podDef.metadata.name}.${namespace}.svc.cluster.local`;
+    const pod_ip = await client.getNodeIP(node.name);
     networkNode = new NetworkNode(
       node.name,
-      WS_URI_PATTERN.replace("{{IP}}", nodeDns).replace(
+      WS_URI_PATTERN.replace("{{IP}}", pod_ip).replace(
         "{{PORT}}",
         endpointPort.toString(),
       ),
-      METRICS_URI_PATTERN.replace("{{IP}}", nodeDns).replace(
+      METRICS_URI_PATTERN.replace("{{IP}}", pod_ip).replace(
         "{{PORT}}",
         PROMETHEUS_PORT.toString(),
       ),
@@ -179,6 +186,8 @@ export const spawnNode = async (
   }
 
   networkNode.group = node.group;
+  // add the full spec
+  networkNode.spec = node;
 
   if (parachain) {
     const paraId = parachain.id;

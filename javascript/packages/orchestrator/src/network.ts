@@ -2,6 +2,7 @@ import {
   CreateLogTable,
   TimeoutAbortController,
   decorators,
+  getLokiUrlForNetworkErrors,
 } from "@zombienet/utils";
 import fs from "fs";
 import {
@@ -162,16 +163,25 @@ export class Network {
   async dumpLogs(showLogPath = true): Promise<string> {
     const logsPath = this.tmpDir + "/logs";
     // create dump directory in local temp
-    if (!fs.existsSync(logsPath)) fs.mkdirSync(logsPath);
+    try {
+      await fs.promises.access(
+        logsPath,
+        fs.promises.constants.R_OK | fs.promises.constants.W_OK,
+      );
+    } catch {
+      // create dir
+      await fs.promises.mkdir(logsPath);
+    }
+
     const paraNodes: NetworkNode[] = Object.values(this.paras).reduce(
       (memo: NetworkNode[], value) => memo.concat(value.nodes),
       [],
     );
 
-    const dumpsPromises = this.relay.concat(paraNodes).map((node) => {
-      this.client.dumpLogs(this.tmpDir, node.name);
-    });
-    await Promise.allSettled(dumpsPromises);
+    const dumpsNodes = this.relay.concat(paraNodes);
+    await Promise.allSettled(
+      dumpsNodes.map((node) => this.client.dumpLogs(this.tmpDir, node.name)),
+    );
 
     if (showLogPath)
       new CreateLogTable({ colWidths: [20, 100] }).pushToPrint([
@@ -331,6 +341,33 @@ export class Network {
         this.showNodeInfo(node, provider, logTable);
       }
     }
+
+    // Add network-wide error logs link for kubernetes provider
+    if (this.client.providerName === "kubernetes" && this.networkStartTime) {
+      const inCI = process.env.RUN_IN_CONTAINER === "1";
+      if (inCI) {
+        const networkLokiUrl = getLokiUrlForNetworkErrors(
+          this.namespace,
+          this.networkStartTime,
+        );
+        logTable.pushTo([
+          [
+            {
+              colSpan: 2,
+              hAlign: "center",
+              content: decorators.cyan("🌐 All nodes logs (Grafana)"),
+            },
+          ],
+          [
+            {
+              colSpan: 2,
+              content: decorators.bright(networkLokiUrl),
+            },
+          ],
+        ]);
+      }
+    }
+
     logTable.print();
   }
 
@@ -360,8 +397,12 @@ export class Network {
       [{ colSpan: 2, hAlign: "center", content: "Node Information" }],
       [decorators.cyan("Name"), decorators.green(node.name)],
       [
-        decorators.cyan("Direct Link"),
+        decorators.cyan("Direct Link (pjs)"),
         `https://polkadot.js.org/apps/?rpc=${wsUri}#/explorer`,
+      ],
+      [
+        decorators.cyan("Direct Link (papi)"),
+        `https://dev.papi.how/explorer#networkId=custom&endpoint=${wsUri}`,
       ],
       [decorators.cyan("Prometheus Link"), node.prometheusUri],
       [decorators.cyan("Log Cmd"), logCommand],
@@ -371,9 +412,14 @@ export class Network {
   replaceWithNetworInfo(placeholder: string): string {
     return placeholder.replace(
       TOKEN_PLACEHOLDER,
-      (_substring, nodeName, key: keyof NetworkNode) => {
-        const node = this.getNodeByName(nodeName);
-        return node[key];
+      (_substring, nodeNameOrNetwork, key: keyof NetworkNode) => {
+        if (nodeNameOrNetwork === "network") {
+          const key_to_use = (key as string) == "base_path" ? "tmpDir" : key;
+          return this[key_to_use as keyof Network];
+        } else {
+          const node = this.getNodeByName(nodeNameOrNetwork);
+          return node[key as keyof NetworkNode];
+        }
       },
     );
   }

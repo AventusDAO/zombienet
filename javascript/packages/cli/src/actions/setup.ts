@@ -3,6 +3,8 @@ import cliProgress from "cli-progress";
 import fs from "fs";
 import path from "path";
 
+const debug = require("debug")("zombie-cli::setup");
+
 interface OptIf {
   [key: string]: { name: string; url?: string; size?: string };
 }
@@ -25,13 +27,13 @@ const options: OptIf = {};
  * @returns
  */
 export async function setup(params: any, opts?: any) {
-  // If the platform is MacOS then the repos needs to be cloned and run locally by the user
+  // If the platform is MacOS (intel) then the repos needs to be cloned and run locally by the user
   // as polkadot and/or polkadot-parachain do not release a valid binaries for MacOS
-  if (process.platform === "darwin") {
+  if (process.platform === "darwin" && process.arch !== "arm64") {
     console.log(
       `${decorators.red(
         "\n\n------------------------------------------------------------------------\n\nNote: ",
-      )} You are using MacOS. Please, clone Polkadot SDK from ` +
+      )} You are using MacOS (intel). Please, clone Polkadot SDK from ` +
         decorators.cyan("https://github.com/paritytech/polkadot-sdk") +
         ` \n in order to build the polkadot and/or polkadot-parachain locally.\n At the moment there is no binaries for MacOs as releases.` +
         decorators.red(
@@ -42,68 +44,78 @@ export async function setup(params: any, opts?: any) {
   }
 
   console.log(decorators.green("\n\n🧟🧟🧟 ZombieNet Setup 🧟🧟🧟\n\n"));
-  if (!["linux"].includes(process.platform)) {
+  if (!isValidHost()) {
     console.log(
-      "Zombienet setup currently supports only linux. \n Alternative, you can use k8s or podman. For more read here: https://github.com/paritytech/zombienet#requirements-by-provider",
+      "Zombienet setup currently supports only linux(x64) and MacOS (arm64). \n Alternative, you can use k8s or podman. For more read here: https://github.com/paritytech/zombienet#requirements-by-provider",
     );
     return;
   }
 
   console.log(decorators.green("Gathering latest releases' versions...\n"));
+  const arch_sufix = process.arch === "arm64" ? "aarch64-apple-darwin" : "";
+
+  const allReleases = await getAllReleases(POLKADOT_SDK);
+
   await new Promise<void>((resolve) => {
-    latestPolkadotReleaseURL(POLKADOT_SDK, POLKADOT).then(
-      (res: [string, string]) => {
-        options[POLKADOT] = {
-          name: POLKADOT,
-          url: res[0],
-          size: res[1],
-        };
-        resolve();
-      },
-    );
+    latestPolkadotReleaseURL(
+      POLKADOT_SDK,
+      `${POLKADOT}${arch_sufix ? "-" + arch_sufix : ""}`,
+      allReleases,
+    ).then((res: [string, string]) => {
+      options[POLKADOT] = {
+        name: POLKADOT,
+        url: res[0],
+        size: res[1],
+      };
+      resolve();
+    });
   });
 
   await new Promise<void>((resolve) => {
-    latestPolkadotReleaseURL(POLKADOT_SDK, POLKADOT_PREPARE_WORKER).then(
-      (res: [string, string]) => {
-        options[POLKADOT_PREPARE_WORKER] = {
-          name: POLKADOT_PREPARE_WORKER,
-          url: res[0],
-          size: res[1],
-        };
-        resolve();
-      },
-    );
+    latestPolkadotReleaseURL(
+      POLKADOT_SDK,
+      `${POLKADOT_PREPARE_WORKER}${arch_sufix ? "-" + arch_sufix : ""}`,
+      allReleases,
+    ).then((res: [string, string]) => {
+      options[POLKADOT_PREPARE_WORKER] = {
+        name: POLKADOT_PREPARE_WORKER,
+        url: res[0],
+        size: res[1],
+      };
+      resolve();
+    });
   });
 
   await new Promise<void>((resolve) => {
-    latestPolkadotReleaseURL(POLKADOT_SDK, POLKADOT_EXECUTE_WORKER).then(
-      (res: [string, string]) => {
-        options[POLKADOT_EXECUTE_WORKER] = {
-          name: POLKADOT_EXECUTE_WORKER,
-          url: res[0],
-          size: res[1],
-        };
-        resolve();
-      },
-    );
+    latestPolkadotReleaseURL(
+      POLKADOT_SDK,
+      `${POLKADOT_EXECUTE_WORKER}${arch_sufix ? "-" + arch_sufix : ""}`,
+      allReleases,
+    ).then((res: [string, string]) => {
+      options[POLKADOT_EXECUTE_WORKER] = {
+        name: POLKADOT_EXECUTE_WORKER,
+        url: res[0],
+        size: res[1],
+      };
+      resolve();
+    });
   });
 
   await new Promise<void>((resolve) => {
-    latestPolkadotReleaseURL(POLKADOT_SDK, POLKADOT_PARACHAIN).then(
-      (res: [string, string]) => {
-        options[POLKADOT_PARACHAIN] = {
-          name: POLKADOT_PARACHAIN,
-          url: res[0],
-          size: res[1],
-        };
-        resolve();
-      },
-    );
+    latestPolkadotReleaseURL(
+      POLKADOT_SDK,
+      `${POLKADOT_PARACHAIN}${arch_sufix ? "-" + arch_sufix : ""}`,
+      allReleases,
+    ).then((res: [string, string]) => {
+      options[POLKADOT_PARACHAIN] = {
+        name: POLKADOT_PARACHAIN,
+        url: res[0],
+        size: res[1],
+      };
+      resolve();
+    });
   });
 
-  // If the platform is MacOS then the polkadot repo needs to be cloned and run locally by the user
-  // as polkadot do not release a binary for MacOS
   if (params[0] === "all") {
     params = [POLKADOT, POLKADOT_PARACHAIN];
   }
@@ -165,6 +177,18 @@ export async function setup(params: any, opts?: any) {
 }
 
 // helper fns
+
+// Check if the host is a valid platform/arch
+const isValidHost = (): boolean => {
+  const isValid =
+    process.platform === "linux" && process.arch === "x64"
+      ? true
+      : process.platform === "darwin" && process.arch === "arm64"
+        ? true
+        : false;
+
+  return isValid;
+};
 // Download the binaries
 const downloadBinaries = async (binaries: string[]): Promise<void> => {
   try {
@@ -184,6 +208,7 @@ const downloadBinaries = async (binaries: string[]): Promise<void> => {
       cliProgress.Presets.shades_grey,
     );
 
+    debug("Download info:", options);
     for (const binary of binaries) {
       promises.push(
         new Promise<void>(async (resolve) => {
@@ -242,6 +267,9 @@ const downloadBinaries = async (binaries: string[]): Promise<void> => {
       ),
       decorators.blue(`export PATH=${process.cwd()}:$PATH\n\n`),
     );
+
+    // set exit code
+    process.exitCode = 0;
   } catch (err) {
     console.log(
       `\n ${decorators.red("Unexpected error: ")} \t ${decorators.bright(
@@ -251,19 +279,46 @@ const downloadBinaries = async (binaries: string[]): Promise<void> => {
   }
 };
 
+const getAllReleases = async (repo: string): Promise<any> => {
+  // allow to read releases from file
+  if (process.env.ZOMBIE_RELEASES_FILE) {
+    const content = await fs.promises.readFile(
+      process.env.ZOMBIE_RELEASES_FILE,
+    );
+    return JSON.parse(content.toString());
+  }
+
+  const release_url = `https://api.github.com/repos/paritytech/${repo}/releases`;
+  debug(`release url: ${release_url}`);
+  const headers: any = {
+    Accept: "application/vnd.github+json",
+  };
+
+  if (process.env.GH_TOKEN) {
+    headers["Authorization"] = `Bearer ${process.env.GH_TOKEN}`;
+  }
+
+  const releases = await fetch(
+    `https://api.github.com/repos/paritytech/${repo}/releases`,
+    headers,
+  );
+
+  const allReleases = await releases.json();
+  if (process.env.ZOMBIE_TRACE) {
+    debug(`all releases: \n ${JSON.stringify(allReleases)}`);
+  }
+  return allReleases;
+};
+
 // Retrieve the latest release for polkadot
 const latestPolkadotReleaseURL = async (
   repo: string,
   name: string,
+  allReleases: any,
 ): Promise<[string, string]> => {
   try {
-    const releases = await fetch(
-      `https://api.github.com/repos/paritytech/${repo}/releases`,
-    );
-
     let obj: any;
 
-    const allReleases = await releases.json();
     const release = allReleases.find((r: any) => {
       obj = r?.assets?.find((a: any) => a.name === name);
       return Boolean(obj);
@@ -291,9 +346,13 @@ const latestPolkadotReleaseURL = async (
       throw new Error(
         "Could not find a release. Error 404 (not found) detected",
       );
+    } else if (err.response) {
+      throw new Error(
+        `Error status: ${err?.response?.status}. Error message: ${err?.response}`,
+      );
     }
-    throw new Error(
-      `Error status: ${err?.response?.status}. Error message: ${err?.response}`,
-    );
+
+    // fallthrough
+    throw new Error(`Error: ${err}`);
   }
 };

@@ -53,6 +53,9 @@ export interface Parachain extends CommonParachainConfig {
   wasmPath?: string;
   statePath?: string;
   collators: Node[];
+  defaultArgs: string[];
+  defaultSubstrateCliArgsVersion?: SubstrateCliArgsVersion;
+  withCustomProps?: boolean;
 }
 
 export interface Node extends NodeCommonTypes, Ports {

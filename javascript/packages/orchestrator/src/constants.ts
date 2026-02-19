@@ -128,6 +128,8 @@ const DEFAULT_KEYSTORE_KEY_TYPES: string[] = [
   "rate",
   "bcsv",
   "ftsv",
+  "avnk",
+  "nodk",
 ];
 
 export {

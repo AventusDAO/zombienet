@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { format } from "util";
-import { LOKI_URL_FOR_NODE } from "./constants";
+import { LOKI_URL_FOR_NODE, LOKI_URL_FOR_NETWORK_ERRORS } from "./constants";
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -120,6 +120,21 @@ export function getLokiUrl(
   return loki_url;
 }
 
+export function getLokiUrlForNetworkErrors(
+  namespace: string,
+  from: number | string,
+  to?: number | string,
+): string {
+  const loki_url = LOKI_URL_FOR_NETWORK_ERRORS.replace(
+    /{{namespace}}/,
+    namespace,
+  )
+    .replace(/{{from}}/, from.toString())
+    .replace(/{{to}}/, to?.toString() || "now");
+
+  return loki_url;
+}
+
 export const TimeoutAbortController = (time: number) => {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), time * 1000);
@@ -155,7 +170,7 @@ export function getFilePathNameExt(filePath: string): {
 
 export function validateImageUrl(image: string): string {
   const regex =
-    /^(?<Name>(?<=^)(?:(?<Domain>(?:(?:localhost|[\w-]+(?:\.[\w-]+)+)(?::\d+)?)|[\w]+:\d+)\/)?\/?(?<Namespace>(?:(?:[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*)\/)*)(?<Repo>[a-z0-9-]+))[:@]?(?<Reference>(?<=:)(?<Tag>[\w][\w.-]{0,127})|(?<=@)(?<Digest>[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*[:][0-9A-Fa-f]{32,}))?/gm;
+    /^((?<=^)(?:((?:(?:localhost|[\w-]+(?:\.[\w-]+)+)(?::\d+)?)|[\w]+:\d+)\/)?\/?((?:(?:[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*)\/)*)([a-z0-9-]+))[:@]?((?<=:)([\w][\w.-]{0,127})|(?<=@)([A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*[:][0-9A-Fa-f]{32,}))?/gm;
 
   if (!image.match(regex)) {
     throw new Error("Image's URL is invalid: `" + image + "`");
